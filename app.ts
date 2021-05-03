@@ -1,3 +1,6 @@
+import * as dotenv from 'dotenv'
+dotenv.config()
+
 import * as express from 'express'
 import {smarthome} from 'actions-on-google'
 import {json} from 'body-parser'
