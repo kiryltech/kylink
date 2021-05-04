@@ -32,10 +32,10 @@ home.onSync(async (body) => {
                     nicknames: [device.name],
                 },
                 deviceInfo: {
-                    manufacturer: 'North Solar Screen',
-                    model: 'Grande',
+                    manufacturer: 'Somfy',
+                    model: 'MyLink',
                     hwVersion: '1.0',
-                    swVersion: '1.0.1',
+                    swVersion: '1.0.0',
                 },
                 willReportState: false,
                 attributes: {
