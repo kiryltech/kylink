@@ -1,14 +1,11 @@
 {
   "name": "kylink",
   "version": "1.0.0",
-  "description": "",
   "main": "index.js",
   "scripts": {
     "compile": "tsc"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "me@kiryl.tech",
   "dependencies": {
     "actions-on-google": "^2.14.0",
     "dotenv": "^8.2.0",
