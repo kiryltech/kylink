@@ -1,4 +1,5 @@
 import SocketPool from 'socket-pool';
+import * as json from 'json-multi-parse'
 
 const host = process.env.SOMFY_HOST
 const port = process.env.SOMFY_PORT
@@ -14,9 +15,7 @@ export async function sendCommand(cmd) {
             con.write(JSON.stringify(cmd));
             con.on('data', data => {
                 try {
-                    // Hack to process multiple responses.
-                    // TODO: json-multi-parse
-                    JSON.parse('[' + data.toString().replace(/}{/g, '},{') + ']')
+                    json(data.toString())
                         .forEach(res => {
                             if (res.id === cmd.id) {
                                 resolve(res.result);
