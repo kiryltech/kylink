@@ -1,9 +1,11 @@
 import SocketPool from 'socket-pool';
 import * as json from 'json-multi-parse'
+import config from "./config";
 
-const host = process.env.SOMFY_HOST
-const port = process.env.SOMFY_PORT
-const systemId = process.env.SOMFY_SYSTEM_ID
+let somfyConf = config().somfy;
+const host = somfyConf.host
+const port = somfyConf.port
+const systemId = somfyConf.systemId
 const pool = new SocketPool({
     connect: {host, port},
 });
