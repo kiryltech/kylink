@@ -2,6 +2,9 @@ import * as express from "express";
 import * as util from 'util'
 import * as crypto from 'crypto'
 import config from "./config";
+import * as debug from 'debug'
+
+const LOG = debug('kylink:auth')
 
 const app = express();
 
@@ -14,6 +17,7 @@ app.use((req, res, next) => {
     const clientId = req.query.client_id ?
         req.query.client_id : req.body.client_id;
     if (oauthConf.clientId != clientId) {
+        LOG(`Invalid clientId: ${clientId}`);
         res.status(401).send('Unauthorized.');
         return;
     }
@@ -22,6 +26,7 @@ app.use((req, res, next) => {
 
 app.get('/', (req, res, next) => {
     if (req.query.p != oauthConf.secret) {
+        LOG(`Incorrect auth secret code: ${req.query.p}`)
         res.status(401).send('Unauthorized.');
         return;
     }
@@ -64,10 +69,12 @@ function generateAccessToken() {
 app.use('/token', (req, res) => {
     const grantType = req.query.grant_type ?
         req.query.grant_type : req.body.grant_type;
+    LOG(`grant_type: ${grantType}`);
     if (grantType == 'authorization_code') {
         if (!req.body.code ||
             !(req.body.code in codeRegistry) ||
             codeRegistry[req.body.code] < Date.now()) {
+            LOG(`Invalid or expired code: ${req.body.code}`);
             res.status(401).send('Unauthorized.');
             return;
         }
@@ -84,6 +91,7 @@ app.use('/token', (req, res) => {
         const refreshToken = req.query.refresh_token ?
             req.query.refresh_token : req.body.refresh_token;
         if (!(refreshToken in refreshTokens)) {
+            LOG(`Unknown refresh token: ${req.body.code}`);
             res.status(401).send('Unauthorized.');
             return;
         }
@@ -93,6 +101,7 @@ app.use('/token', (req, res) => {
             expires_in: oauthConf.tokenTTL,
         });
     } else {
+        LOG(`Grant type '${grantType}' is unsupported.`)
         res.status(400).send('Grant type is not supported.')
     }
 });
@@ -112,32 +121,39 @@ export function validateToken(scope) {
     return function (req, res, next) {
         const authHeader = req.header('authorization');
         if (!authHeader.startsWith('Bearer')) {
+            LOG(`Authorization header should start with "Bearer": ${authHeader}`);
             res.status(401).send('Unauthorized.');
             return;
         }
         const [_, token] = authHeader.split(' ', 2);
         if (!token) {
+            LOG(`Token extraction error, authorization header: ${authHeader}`);
             res.status(401).send('Unauthorized.');
             return;
         }
         const [header, payload, signature] = token.split('.', 3);
         if (!signature || signature !== sign(header + '.' + payload)) {
+            LOG(`Token signature verification error: ${token}`);
             res.status(401).send('Unauthorized.');
             return;
         }
         const payloadJson = base64ToJson(payload);
         if (payloadJson.accessLevel.indexOf(scope) == -1) {
+            LOG(`Access to scope "${scope}" is not allowed: ${payloadJson.accessLevel}`);
             res.status(401).send('Unauthorized.');
             return;
         }
         if (!payloadJson.iat || payloadJson.iat > Date.now() / 1000) {
+            LOG(`Token timestamp is from the future: ${payloadJson.iat}`);
             res.status(401).send('Invalid token.');
             return;
         }
         if (payloadJson.iat + oauthConf.tokenTTL < Date.now() / 1000) {
+            LOG(`Token has been expired.`);
             res.status(401).send('Token has been expired.');
             return;
         }
+        LOG(`Token verification passed!`);
         next();
     }
 }
