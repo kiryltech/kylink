@@ -4,14 +4,13 @@ import {createServer as createHttpsServer} from 'https'
 import {createServer as createHttpServer} from 'http'
 import {readFileSync} from 'fs'
 import smarthome from './smarthome'
-import auth, {validateToken} from './auth'
+import {validateToken} from './auth-validation'
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded());
 
 app.use('/smarthome', validateToken('smarthome'), smarthome());
-app.use('/auth', auth());
 
 function initServer(app) {
     if (config().https) {
