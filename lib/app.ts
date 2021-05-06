@@ -1,6 +1,7 @@
 import config from './config'
 import * as express from 'express'
-import {createServer} from 'https'
+import {createServer as createHttpsServer} from 'https'
+import {createServer as createHttpServer} from 'http'
 import {readFileSync} from 'fs'
 import smarthome from './smarthome'
 import auth, {validateToken} from './auth'
@@ -12,12 +13,19 @@ app.use(express.urlencoded());
 app.use('/smarthome', validateToken('smarthome'), smarthome());
 app.use('/auth', auth());
 
-const options = {
-    key: readFileSync(config().https.keyFile),
-    cert: readFileSync(config().https.certFile)
-};
+function initServer(app) {
+    if (config().https) {
+        const options = {
+            key: readFileSync(config().https.keyFile),
+            cert: readFileSync(config().https.certFile)
+        };
+        return createHttpsServer(options, app);
+    } else {
+        return createHttpServer(app);
+    }
+}
 
-const port = 9000;
-createServer(options, app).listen(port, () => {
+const port = config().express.port;
+initServer(app).listen(port, () => {
     console.log(`Server started at port ${port}.`);
 });
