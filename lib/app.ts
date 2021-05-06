@@ -1,14 +1,13 @@
 import config from './config'
 import * as express from 'express'
-import {json, urlencoded} from 'body-parser'
 import {createServer} from 'https'
 import {readFileSync} from 'fs'
 import smarthome from './smarthome'
 import auth, {validateToken} from './auth'
 
 const app = express();
-app.use(json());
-app.use(urlencoded());
+app.use(express.json());
+app.use(express.urlencoded());
 
 app.use('/smarthome', validateToken('smarthome'), smarthome());
 app.use('/auth', auth());
