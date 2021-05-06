@@ -62,8 +62,10 @@ function toSomfyCommandList(cmd) {
 home.onExecute(async (body) => {
     let commands = body.inputs[0].payload.commands
         .flatMap(toSomfyCommandList);
-    const result = await Promise.all(
-        commands.map(somfy.sendCommand));
+    const result = [];
+    for (let i in commands) {
+        result.push(await somfy.sendCommand(commands[i]));
+    }
     return {
         requestId: body.requestId,
         payload: {

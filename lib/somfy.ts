@@ -1,38 +1,46 @@
-import SocketPool from 'socket-pool';
+import {Socket} from 'net';
+import * as debug from 'debug';
 import * as json from 'json-multi-parse'
 import config from "./config";
 
+const LOG = debug('kylink:somfy');
+
 let somfyConf = config().somfy;
-const host = somfyConf.host
-const port = somfyConf.port
-const systemId = somfyConf.systemId
-const pool = new SocketPool({
-    connect: {host, port},
+const host = somfyConf.host;
+const port = somfyConf.port;
+const systemId = somfyConf.systemId;
+const con = new Socket().connect(port, host);
+const cmdReg = new Map();
+con.on('data', data => {
+    try {
+        json(data.toString())
+            .forEach(res => {
+                if (cmdReg.has(res.id)) {
+                    cmdReg.get(res.id)(res.result);
+                    cmdReg.delete(res.id);
+                }
+            });
+    } catch (err) {
+        LOG(`Data '${data.toString()}' processing error: ${err}`);
+    }
 });
 let cmdId = 1;
 
-export async function sendCommand(cmd) {
-    return pool.acquire().then(con =>
-        new Promise((resolve, reject) => {
-            con.write(JSON.stringify(cmd));
-            con.on('data', data => {
-                try {
-                    json(data.toString())
-                        .forEach(res => {
-                            if (res.id === cmd.id) {
-                                resolve(res.result);
-                            }
-                        });
-                } catch (err) {
-                    reject(err);
-                } finally {
-                    con.release();
-                }
-            });
-        }));
+// TODO: make execution sequential
+export async function sendCommand(cmd): Promise<any> {
+    return new Promise((resolve) => {
+        cmdReg.set(cmd.id, resolve);
+        con.write(JSON.stringify(cmd));
+        setTimeout(() => {
+            if (cmdReg.has(cmd.id)) {
+                cmdReg.get(cmd.id)(false);
+                cmdReg.delete(cmd.id);
+            }
+        }, 5000)
+    });
 }
 
-export async function listDevices() {
+export async function listDevices(): Promise<[any]> {
     return await sendCommand({
         method: 'mylink.status.info',
         params: {
@@ -40,7 +48,7 @@ export async function listDevices() {
             auth: systemId
         },
         id: cmdId++
-    })
+    });
 }
 
 export function toSomfyCommand(device, execution) {
