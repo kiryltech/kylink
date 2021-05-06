@@ -3,14 +3,13 @@ import * as util from 'util'
 import * as crypto from 'crypto'
 import config from "./config";
 import * as debug from 'debug'
+import {Tedis} from "tedis";
 
-const LOG = debug('kylink:auth')
+const AUTH_CODE_TTL_MILLIS = 60000;
+const LOG = debug('kylink:auth');
 
+const tedis = new Tedis();
 const app = express();
-
-const codeRegistry = {};
-const refreshTokens = {};
-
 const oauthConf = config().oauth;
 
 app.use((req, res, next) => {
@@ -24,7 +23,7 @@ app.use((req, res, next) => {
     next();
 });
 
-app.get('/', (req, res, next) => {
+app.get('/', async (req, res) => {
     if (req.query.p != oauthConf.secret) {
         LOG(`Incorrect auth secret code: ${req.query.p}`)
         res.status(401).send('Unauthorized.');
@@ -33,7 +32,8 @@ app.get('/', (req, res, next) => {
     // @ts-ignore
     const redirectUrl = decodeURIComponent(req.query.redirect_uri);
     const code = crypto.randomBytes(128).toString('base64url');
-    codeRegistry[code] = Date.now() + 60000;
+    await tedis.set(`kylink:code:${code}`, '');
+    await tedis.pexpire(`kylink:code:${code}`, AUTH_CODE_TTL_MILLIS);
     res.redirect(util.format('%s?code=%s&state=%s',
         redirectUrl, code,
         req.query.state));
@@ -66,21 +66,20 @@ function generateAccessToken() {
     return unsignedToken + '.' + sign(unsignedToken);
 }
 
-app.use('/token', (req, res) => {
+app.use('/token', async (req, res) => {
     const grantType = req.query.grant_type ?
         req.query.grant_type : req.body.grant_type;
     LOG(`grant_type: ${grantType}`);
     if (grantType == 'authorization_code') {
         if (!req.body.code ||
-            !(req.body.code in codeRegistry) ||
-            codeRegistry[req.body.code] < Date.now()) {
+            !(await tedis.exists(`kylink:code:${req.body.code}`))) {
             LOG(`Invalid or expired code: ${req.body.code}`);
             res.status(401).send('Unauthorized.');
             return;
         }
-        delete codeRegistry[req.body.code];
+        await tedis.del(`kylink:code:${req.body.code}`);
         const refreshToken = crypto.randomBytes(128).toString('base64url');
-        refreshTokens[refreshToken] = Date.now();
+        await tedis.set(`kylink:refresh:${refreshToken}`, Date.now().toString());
         res.status(200).json({
             token_type: 'bearer',
             access_token: generateAccessToken(),
@@ -90,7 +89,7 @@ app.use('/token', (req, res) => {
     } else if (grantType === 'refresh_token') {
         const refreshToken = req.query.refresh_token ?
             req.query.refresh_token : req.body.refresh_token;
-        if (!(refreshToken in refreshTokens)) {
+        if (!(await tedis.exists(`kylink:refresh:${refreshToken}`))) {
             LOG(`Unknown refresh token: ${req.body.code}`);
             res.status(401).send('Unauthorized.');
             return;
@@ -125,7 +124,7 @@ export function validateToken(scope) {
             res.status(401).send('Unauthorized.');
             return;
         }
-        const [_, token] = authHeader.split(' ', 2);
+        const [, token] = authHeader.split(' ', 2);
         if (!token) {
             LOG(`Token extraction error, authorization header: ${authHeader}`);
             res.status(401).send('Unauthorized.');

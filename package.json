@@ -12,6 +12,7 @@
     "express": "^4.17.1",
     "json-multi-parse": "^1.2.0",
     "socket-pool": "^1.2.3",
+    "tedis": "^0.1.12",
     "yaml": "^1.10.2"
   },
   "devDependencies": {
