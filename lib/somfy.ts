@@ -12,8 +12,10 @@ const systemId = somfyConf.systemId;
 const cmdReg = new Map();
 const con = new Socket().connect(port, host);
 con.on('data', data => {
+    const dataString = data.toString();
+    LOG(`hub >>> ${dataString}`);
     try {
-        json(data.toString())
+        json(dataString)
             .forEach(res => {
                 if (cmdReg.has(res.id)) {
                     cmdReg.get(res.id).resolve(res.result);
@@ -21,7 +23,7 @@ con.on('data', data => {
                 }
             });
     } catch (err) {
-        LOG(`Data '${data.toString()}' processing error: ${err}`);
+        LOG(`Data '${dataString}' processing error: ${err}`);
     }
 });
 let cmdId = 1;
@@ -30,7 +32,9 @@ let cmdId = 1;
 async function sendCommand(cmd): Promise<any> {
     return new Promise((resolve, reject) => {
         cmdReg.set(cmd.id, {resolve, reject});
-        con.write(JSON.stringify(cmd));
+        const cmdString = JSON.stringify(cmd);
+        LOG(`hub <<< ${cmdString}`);
+        con.write(cmdString);
         setTimeout(() => {
             if (cmdReg.has(cmd.id)) {
                 cmdReg.get(cmd.id).reject("Timeout error.");
