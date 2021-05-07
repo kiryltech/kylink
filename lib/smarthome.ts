@@ -1,6 +1,10 @@
-import {smarthome} from "actions-on-google";
+import {smarthome, SmartHomeV1ExecuteRequest, SmartHomeV1ExecuteRequestCommands} from "actions-on-google";
 import * as somfy from "./somfy";
+import {Tedis, TedisPool} from "tedis";
 
+const TIME_TO_FULL_CLOSE_MILLIS = 20000;
+
+const tedisPool = new TedisPool();
 const home = smarthome();
 
 home.onSync(async (body) => {
@@ -28,7 +32,6 @@ home.onSync(async (body) => {
                 },
                 willReportState: false,
                 attributes: {
-                    discreteOnlyOpenClose: true,
                     openDirection: ['UP', 'DOWN'],
                     commandOnlyOpenClose: true
                 },
@@ -37,44 +40,79 @@ home.onSync(async (body) => {
     };
 });
 
-home.onQuery((body) => {
-    return {
-        requestId: body.requestId,
-        payload: {
-            devices: body.inputs[0].payload.devices
-                .reduce(
-                    (res, device) =>
-                        ({...res, [device.id]: {}}),
-                    {}
-                )
+home.onQuery(async (body) => {
+    const tedis = await tedisPool.getTedis();
+    try {
+        const devices = {};
+        for (const i in body.inputs[0].payload.devices) {
+            const dev = body.inputs[0].payload.devices[i];
+            devices[dev.id] = {
+                openPercent: parseInt(await tedis.hget(
+                    `kylink:somfy:${dev.id}`,
+                    'openPercent')),
+            }
         }
-    };
+        return {
+            requestId: body.requestId,
+            payload: {devices}
+        };
+    } finally {
+        tedisPool.putTedis(tedis);
+    }
 });
 
-function toSomfyCommandList(cmd) {
-    return cmd.devices.flatMap(device =>
-        cmd.execution.map(execution =>
-            somfy.toSomfyCommand(device, execution)
+function individualize(commands: SmartHomeV1ExecuteRequestCommands[]) {
+    return commands.flatMap(cmd =>
+        cmd.devices.flatMap(device =>
+            cmd.execution.map(execution =>
+                ({device, execution})
+            )
         )
     );
 }
 
-home.onExecute(async (body) => {
-    let commands = body.inputs[0].payload.commands
-        .flatMap(toSomfyCommandList);
-    const result = [];
-    for (let i in commands) {
-        result.push(await somfy.sendCommand(commands[i]));
-    }
-    return {
-        requestId: body.requestId,
-        payload: {
-            commands: result.map((rs, i) => ({
-                ids: [commands[i].params.targetID],
-                status: rs ? 'SUCCESS' : 'ERROR',
-            }))
+async function execute(body: SmartHomeV1ExecuteRequest, tedis: Tedis) {
+    const commands = [];
+    const deviceExecution = individualize(body.inputs[0].payload.commands);
+    for (const i in deviceExecution) {
+        if (deviceExecution[i].execution.command != 'action.devices.commands.OpenClose')
+            throw "Unsupported operation."
+        const deviceId = deviceExecution[i].device.id;
+        const desiredOpenness = deviceExecution[i].execution.params.openPercent;
+        const currentOpenness = parseInt(await tedis.hget(
+            `kylink:somfy:${deviceId}`,
+            'openPercent'));
+        const openRelativePercent = desiredOpenness - currentOpenness;
+        const res = await somfy.move(deviceId, openRelativePercent);
+        if (res) {
+            await tedis.hset(`kylink:somfy:${deviceId}`,
+                'openPercent', deviceExecution[i].execution.params.openPercent);
         }
-    };
+        commands.push({
+            ids: [deviceId],
+            status: res ? 'SUCCESS' : 'ERROR',
+        });
+        const fraction = Math.abs(openRelativePercent) / 100;
+        if (desiredOpenness != 0 && desiredOpenness != 100) {
+            setTimeout(() => {
+                somfy.stop(deviceId);
+            }, TIME_TO_FULL_CLOSE_MILLIS * fraction);
+        }
+    }
+    return commands;
+}
+
+home.onExecute(async (body) => {
+    const tedis = await tedisPool.getTedis();
+    try {
+        const commands = await execute(body, tedis);
+        return {
+            requestId: body.requestId,
+            payload: {commands}
+        };
+    } finally {
+        tedisPool.putTedis(tedis);
+    }
 });
 
 home.onDisconnect(() => {

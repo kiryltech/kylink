@@ -9,14 +9,14 @@ let somfyConf = config().somfy;
 const host = somfyConf.host;
 const port = somfyConf.port;
 const systemId = somfyConf.systemId;
-const con = new Socket().connect(port, host);
 const cmdReg = new Map();
+const con = new Socket().connect(port, host);
 con.on('data', data => {
     try {
         json(data.toString())
             .forEach(res => {
                 if (cmdReg.has(res.id)) {
-                    cmdReg.get(res.id)(res.result);
+                    cmdReg.get(res.id).resolve(res.result);
                     cmdReg.delete(res.id);
                 }
             });
@@ -27,16 +27,16 @@ con.on('data', data => {
 let cmdId = 1;
 
 // TODO: make execution sequential
-export async function sendCommand(cmd): Promise<any> {
-    return new Promise((resolve) => {
-        cmdReg.set(cmd.id, resolve);
+async function sendCommand(cmd): Promise<any> {
+    return new Promise((resolve, reject) => {
+        cmdReg.set(cmd.id, {resolve, reject});
         con.write(JSON.stringify(cmd));
         setTimeout(() => {
             if (cmdReg.has(cmd.id)) {
-                cmdReg.get(cmd.id)(false);
+                cmdReg.get(cmd.id).reject("Timeout error.");
                 cmdReg.delete(cmd.id);
             }
-        }, 5000)
+        }, 5000);
     });
 }
 
@@ -51,18 +51,27 @@ export async function listDevices(): Promise<[any]> {
     });
 }
 
-export function toSomfyCommand(device, execution) {
-    if (execution.command != 'action.devices.commands.OpenClose')
-        throw "Unsupported operation."
-    const method = execution.params.openPercent == 100
-        ? 'mylink.move.up'
-        : 'mylink.move.down'
-    return {
-        method,
+export async function stop(deviceId: string): Promise<any> {
+    return await sendCommand({
+        method: 'mylink.move.stop',
         params: {
-            targetID: device.id,
+            targetID: deviceId,
             auth: systemId
         },
+        id: cmdId++
+    });
+}
+
+export async function move(deviceId, openRelativePercent) {
+    const method = openRelativePercent < 0
+        ? 'mylink.move.down'
+        : 'mylink.move.up';
+    return await sendCommand({
+        method,
+        params: {
+            targetID: deviceId,
+            auth: systemId,
+        },
         id: cmdId++,
-    };
+    });
 }
